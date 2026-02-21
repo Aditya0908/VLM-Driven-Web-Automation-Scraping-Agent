@@ -22,8 +22,8 @@ You can now run a LinkedIn-focused pipeline using Python + Playwright:
 ### 1) Install Python dependencies
 
 ```bash
-python -m pip install -r python/requirements.txt
-python -m playwright install chromium
+python3 -m pip install -r python/requirements.txt
+python3 -m playwright install chromium
 ```
 
 ### 2) Configure credentials and job requirements
@@ -44,7 +44,7 @@ Or place values directly in JSON under `linkedin.email` / `linkedin.password`.
 ### 3) Run LinkedIn agent
 
 ```bash
-python python/linkedin_jobs_agent.py \
+python3 python/linkedin_jobs_agent.py \
   --config examples/linkedin-job-config.example.json \
   --output-root runs/linkedin
 ```
@@ -52,7 +52,7 @@ python python/linkedin_jobs_agent.py \
 Force application mode for a run:
 
 ```bash
-python python/linkedin_jobs_agent.py \
+python3 python/linkedin_jobs_agent.py \
   --config examples/linkedin-job-config.example.json \
   --output-root runs/linkedin \
   --apply
