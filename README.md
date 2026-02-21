@@ -9,6 +9,79 @@ Deterministic Puppeteer runner for VLM-style web automation:
 
 Every run generates replayable automation artifacts so the flow can be executed again without manual intervention.
 
+## LinkedIn-specific Python workflow
+
+You can now run a LinkedIn-focused pipeline using Python + Playwright:
+
+- Search jobs from JSON config criteria
+- Scrape title, company, location, insights, and full description
+- Score each role against required/preferred/excluded keywords
+- Optionally attempt Easy Apply form filling
+- Save artifacts (`scraped_jobs.json`, `relevant_jobs.json`, `application_log.json`, `run_summary.json`)
+
+### 1) Install Python dependencies
+
+```bash
+python -m pip install -r python/requirements.txt
+python -m playwright install chromium
+```
+
+### 2) Configure credentials and job requirements
+
+Copy and edit:
+
+`examples/linkedin-job-config.example.json`
+
+Set credentials with environment variables:
+
+```bash
+export LINKEDIN_EMAIL="your-email@example.com"
+export LINKEDIN_PASSWORD="your-password"
+```
+
+Or place values directly in JSON under `linkedin.email` / `linkedin.password`.
+
+### 3) Run LinkedIn agent
+
+```bash
+python python/linkedin_jobs_agent.py \
+  --config examples/linkedin-job-config.example.json \
+  --output-root runs/linkedin
+```
+
+Force application mode for a run:
+
+```bash
+python python/linkedin_jobs_agent.py \
+  --config examples/linkedin-job-config.example.json \
+  --output-root runs/linkedin \
+  --apply
+```
+
+Recommended first run is with:
+
+- `application.enabled = false` or
+- `application.dry_run = true`
+
+to avoid accidental submissions while you validate behavior.
+
+### 4) Output artifacts
+
+Each run creates a timestamped folder under `runs/linkedin/` containing:
+
+- `scraped_jobs.json` - every reviewed job with full scraped details
+- `relevant_jobs.json` - jobs passing your requirement checks
+- `application_log.json` - Easy Apply attempts and status
+- `run_summary.json` - high-level counts and artifact paths
+- `agent.log` - step-by-step execution log
+
+### LinkedIn reliability notes
+
+- LinkedIn can challenge automation sessions (checkpoint/CAPTCHA/2FA).
+- Use `linkedin.storage_state_path` in config to persist a successful login session.
+- Selectors can change over time; update selector lists in `python/linkedin_jobs_agent.py` if needed.
+- Respect platform terms and account safety best practices.
+
 ## What this project outputs
 
 Each run writes the following files into `runs/<goal>-<timestamp>/`:

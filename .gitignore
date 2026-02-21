@@ -1,3 +1,7 @@
 node_modules/
 runs/
 npm-debug.log*
+.venv/
+__pycache__/
+*.pyc
+secrets/

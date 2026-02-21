@@ -1,0 +1,83 @@
+{
+  "run_name": "linkedin-python-ml-jobs",
+  "goal": "Find relevant LinkedIn jobs based on profile requirements and attempt Easy Apply.",
+  "linkedin": {
+    "email_env": "LINKEDIN_EMAIL",
+    "password_env": "LINKEDIN_PASSWORD",
+    "storage_state_path": "secrets/linkedin-storage-state.json"
+  },
+  "runtime": {
+    "headless": false,
+    "slow_mo_ms": 0,
+    "action_timeout_ms": 12000,
+    "navigation_timeout_ms": 45000,
+    "allow_manual_login": true,
+    "manual_login_timeout_ms": 180000,
+    "screenshot_each_job": false,
+    "viewport": {
+      "width": 1400,
+      "height": 920
+    }
+  },
+  "search": {
+    "keywords": "python machine learning engineer",
+    "location": "India",
+    "easy_apply_only": true,
+    "sort_by_recent": true,
+    "posted_within_days": 7,
+    "experience_levels": [
+      "entry",
+      "associate"
+    ],
+    "workplace_types": [
+      "remote",
+      "hybrid"
+    ],
+    "max_jobs_to_review": 30,
+    "raw_params": {
+      "f_JT": "F"
+    }
+  },
+  "requirements": {
+    "must_have_keywords": [
+      "python",
+      "machine learning"
+    ],
+    "preferred_keywords": [
+      "nlp",
+      "llm",
+      "data pipeline",
+      "aws",
+      "docker"
+    ],
+    "excluded_keywords": [
+      "principal",
+      "staff engineer",
+      "10+ years"
+    ],
+    "require_all_must_have": false,
+    "minimum_keyword_hits": 2,
+    "minimum_score": 3
+  },
+  "application": {
+    "enabled": false,
+    "dry_run": true,
+    "max_applications_per_run": 3,
+    "max_form_steps": 12,
+    "contact": {
+      "phone": "+91-9999999999",
+      "city": "Bengaluru"
+    },
+    "default_answers": {
+      "First name": "YourFirstName",
+      "Last name": "YourLastName"
+    },
+    "question_answers": {
+      "Years of work experience": "2",
+      "Are you legally authorized to work in this country?": "Yes",
+      "Will you now or in the future require sponsorship?": "No"
+    },
+    "resume_path": "assets/resume.pdf",
+    "cover_letter_path": ""
+  }
+}
