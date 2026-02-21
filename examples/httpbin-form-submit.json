@@ -1,0 +1,84 @@
+{
+  "targetUrl": "https://httpbin.org/forms/post",
+  "goal": "Fill and submit the sample form, then extract response text.",
+  "maxSteps": 20,
+  "inputs": {
+    "customer": {
+      "name": "Avery Tester",
+      "phone": "555-0100",
+      "email": "avery@example.com",
+      "notes": "Automation smoke test."
+    }
+  },
+  "selectorMap": {
+    "Customer name": "input[name=\"custname\"]",
+    "Customer phone": "input[name=\"custtel\"]",
+    "Customer email": "input[name=\"custemail\"]",
+    "Comments": "textarea[name=\"comments\"]",
+    "Submit button": "button[type=\"submit\"]"
+  },
+  "flow": [
+    {
+      "purpose": "Wait for form root",
+      "action": "waitForSelector",
+      "selector": "form"
+    },
+    {
+      "purpose": "Type customer name",
+      "action": "type",
+      "selector": "input[name=\"custname\"]",
+      "value": "{{customer.name}}"
+    },
+    {
+      "purpose": "Type customer phone",
+      "action": "type",
+      "selector": "input[name=\"custtel\"]",
+      "value": "{{customer.phone}}"
+    },
+    {
+      "purpose": "Type customer email",
+      "action": "type",
+      "selector": "input[name=\"custemail\"]",
+      "value": "{{customer.email}}"
+    },
+    {
+      "purpose": "Choose large size option",
+      "action": "click",
+      "selector": "input[name=\"size\"][value=\"large\"]"
+    },
+    {
+      "purpose": "Select bacon topping",
+      "action": "click",
+      "selector": "input[name=\"topping\"][value=\"bacon\"]"
+    },
+    {
+      "purpose": "Type form comments",
+      "action": "type",
+      "selector": "textarea[name=\"comments\"]",
+      "value": "{{customer.notes}}"
+    },
+    {
+      "purpose": "Submit form",
+      "action": "click",
+      "selector": "button[type=\"submit\"]",
+      "waitForNavigation": true
+    },
+    {
+      "purpose": "Wait for response page",
+      "action": "waitForSelector",
+      "selector": "pre"
+    },
+    {
+      "purpose": "Extract response body",
+      "action": "extract",
+      "name": "submissionResponse",
+      "selector": "pre",
+      "multiple": false,
+      "attribute": null
+    },
+    {
+      "purpose": "Stop once submission is complete",
+      "action": "finish"
+    }
+  ]
+}

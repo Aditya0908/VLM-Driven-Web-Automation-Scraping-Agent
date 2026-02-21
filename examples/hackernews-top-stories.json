@@ -1,0 +1,33 @@
+{
+  "targetUrl": "https://news.ycombinator.com/",
+  "goal": "Extract the top five story titles and URLs from Hacker News.",
+  "maxSteps": 6,
+  "inputs": {},
+  "selectorMap": {
+    "Story row": "tr.athing",
+    "Story anchor": "tr.athing .titleline > a"
+  },
+  "flow": [
+    {
+      "purpose": "Wait for the story rows to render",
+      "action": "waitForSelector",
+      "selector": "tr.athing"
+    },
+    {
+      "purpose": "Extract top five stories",
+      "action": "extract",
+      "name": "topStories",
+      "selector": "tr.athing .titleline > a",
+      "multiple": true,
+      "limit": 5,
+      "fields": {
+        "title": "textContent",
+        "url": "href"
+      }
+    },
+    {
+      "purpose": "Stop once data is extracted",
+      "action": "finish"
+    }
+  ]
+}
