@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tracey - Voice Tracker</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #f4f4f9; margin: 0; }
+        .card { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; width: 350px; }
+        .google-btn { background: #4285F4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px; font-weight: bold; cursor: pointer; border: none; }
+        input { width: 90%; padding: 10px; margin: 20px 0; border-radius: 8px; border: 1px solid #ccc; }
+        .mic-btn { background: #ff4757; color: white; border: none; border-radius: 50%; width: 100px; height: 100px; font-size: 40px; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4); }
+        .mic-btn:active { transform: scale(0.9); }
+        .listening { animation: pulse 1.5s infinite; background: #2ed573; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(46, 213, 115, 0); } 100% { box-shadow: 0 0 0 0 rgba(46, 213, 115, 0); } }
+        #status { margin-top: 20px; font-weight: bold; color: #555; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card" id="loginScreen">
+    <h2>Welcome to Tracey</h2>
+    <p>Your voice-powered project tracker. Sign in to get started.</p>
+    <button class="google-btn" id="loginBtn">Sign in with Google</button>
+</div>
+
+<div class="card hidden" id="appScreen">
+    <h2 id="welcomeText">Dashboard</h2>
+    <input type="text" id="sheetId" placeholder="Paste your Google Sheet ID here">
+    
+    <button class="mic-btn" id="micBtn" style="font-size: 16px; width: 120px; height: 120px;">Talk to<br>Tracey</button>
+    <p id="status">Click to activate Tracey</p>
+    <button onclick="logout()" style="margin-top: 20px; background: none; border: none; color: gray; cursor: pointer; text-decoration: underline;">Logout</button>
+</div>
+
+<script>
+    const loginScreen = document.getElementById('loginScreen');
+    const appScreen = document.getElementById('appScreen');
+    const loginBtn = document.getElementById('loginBtn');
+    const micBtn = document.getElementById('micBtn');
+    const statusText = document.getElementById('status');
+    const sheetIdInput = document.getElementById('sheetId');
+    const welcomeText = document.getElementById('welcomeText');
+
+    // --- TRACEY TTS ---
+    async function speak(text) {
+        try {
+            const response = await fetch('http://localhost:3000/api/speak', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            });
+            if (!response.ok) return;
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            await audio.play();
+            // Return a promise that resolves when audio finishes
+            return new Promise(resolve => {
+                audio.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
+                    resolve();
+                };
+            });
+        } catch (err) {
+            console.error("TTS playback error:", err);
+        }
+    }
+
+    // 1. CHECK LOGIN STATUS
+    // Did we just get redirected back from Google?
+    const urlParams = new URLSearchParams(window.location.search);
+    const userEmailFromUrl = urlParams.get('userEmail');
+
+    if (userEmailFromUrl) {
+        // Save to local storage and clean the URL
+        localStorage.setItem('userEmail', userEmailFromUrl);
+        window.history.replaceState({}, document.title, "/"); 
+    }
+
+    const savedEmail = localStorage.getItem('userEmail');
+
+    if (savedEmail) {
+        // User is logged in! Show the app.
+        loginScreen.classList.add('hidden');
+        appScreen.classList.remove('hidden');
+        welcomeText.innerText = "Hi, " + savedEmail.split('@')[0];
+        speak("Hi, welcome to your tracker! Kindly paste your Google Sheet link, and let me know whenever you have an update. Have a great day!");
+    }
+
+    // 2. HANDLE LOGIN CLICK
+    loginBtn.addEventListener('click', async () => {
+        // Ask the backend for the Google Login URL
+        const res = await fetch('http://localhost:3000/api/auth/url');
+        const data = await res.json();
+        // Send the user to Google
+        window.location.href = data.url;
+    });
+
+    // 3. HANDLE LOGOUT
+    function logout() {
+        localStorage.removeItem('userEmail');
+        location.reload();
+    }
+
+// --- HYBRID WAKE WORD SYSTEM ---
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = new SpeechRecognition();
+recognition.continuous = true;
+recognition.interimResults = false;
+
+let listenTimeout = null;
+let isListening = false;
+
+function startListening() {
+    if (isListening) return;
+    if (!sheetIdInput.value) return alert("Paste your Google Sheet link first!");
+
+    isListening = true;
+    micBtn.classList.add("listening");
+    statusText.innerText = "Tracey is listening...";
+    statusText.style.color = "#555";
+    recognition.start();
+    console.log("Recognition started");
+
+    // Auto-stop after 30 seconds
+    listenTimeout = setTimeout(() => {
+        stopListening();
+        statusText.innerText = "Tracey stopped listening. Click to activate again.";
+    }, 30000);
+}
+
+function stopListening() {
+    isListening = false;
+    micBtn.classList.remove("listening");
+    recognition.stop();
+    if (listenTimeout) {
+        clearTimeout(listenTimeout);
+        listenTimeout = null;
+    }
+}
+
+recognition.onresult = async (event) => {
+    // Get the latest result
+    const lastResult = event.results[event.results.length - 1];
+    if (!lastResult.isFinal) return;
+
+    const transcript = lastResult[0].transcript.trim();
+    console.log("Heard:", transcript);
+
+    // Check for wake word "tracey" (case-insensitive)
+    const lower = transcript.toLowerCase();
+    const wakePatterns = [
+        "hey tracey", "hey tracy", "hey tracie", "hey traci",
+        "a tracey", "a tracy",
+        "tracey", "tracy", "tracie", "traci",
+        "hey stacy", "hey stacey", "stacy", "stacey",
+        "literacy", "hey literacy",
+        "race", "racy", "lacy", "lacey"
+    ];
+    let command = null;
+
+    for (const pattern of wakePatterns) {
+        if (lower.startsWith(pattern)) {
+            // Strip the wake word and any trailing comma/space
+            command = transcript.substring(pattern.length).replace(/^[,\s]+/, "").trim();
+            break;
+        }
+    }
+
+    if (command === null) return; // Not a Tracey command, keep listening
+
+    // Wake word detected but no command after it
+    if (!command) {
+        statusText.innerText = "I heard you! What should I update?";
+        return;
+    }
+
+    // Wake word detected! Stop listening and process
+    stopListening();
+    statusText.innerText = "Tracey is processing...";
+    statusText.style.color = "#555";
+
+    // Speak processing message
+    await speak("Great work! Updating tracker now.");
+
+    try {
+        const response = await fetch('http://localhost:3000/api/update-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: savedEmail,
+                spreadsheetId: sheetIdInput.value,
+                spokenText: command
+            })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            statusText.style.color = "green";
+            statusText.innerText = "Updated: " + data.message;
+            await speak("Tracker sheet updated!");
+        } else {
+            statusText.style.color = "red";
+            statusText.innerText = data.error;
+            await speak("Sorry, something went wrong. Please try again.");
+        }
+    } catch (err) {
+        statusText.style.color = "red";
+        statusText.innerText = "Error connecting to server.";
+        await speak("Sorry, I couldn't connect to the server.");
+    }
+
+    // Reset status after a moment
+    setTimeout(() => {
+        statusText.style.color = "#555";
+        statusText.innerText = "Click to activate Tracey";
+    }, 4000);
+};
+
+recognition.onerror = (event) => {
+    console.error("Speech error:", event.error);
+    stopListening();
+    statusText.innerText = "Click to activate Tracey";
+};
+
+recognition.onend = () => {
+    // If still supposed to be listening (browser auto-stopped), restart
+    if (isListening) {
+        recognition.start();
+    }
+};
+
+micBtn.addEventListener('click', () => {
+    if (isListening) {
+        stopListening();
+        statusText.innerText = "Click to activate Tracey";
+    } else {
+        startListening();
+    }
+});
+</script>
+
+</body>
+</html>
