@@ -23,14 +23,30 @@ You can now run a LinkedIn-focused pipeline using Python + Playwright:
 
 ```bash
 python3 -m pip install -r python/requirements.txt
-python3 -m playwright install chromium
 ```
+
+Browser runtime options (set in JSON as `runtime.browser`):
+
+- `chromium` (default): install Playwright Chromium
+  ```bash
+  python3 -m playwright install chromium
+  ```
+- `chrome`: uses installed Google Chrome channel
+- `msedge`: uses installed Microsoft Edge channel
 
 ### 2) Configure credentials and job requirements
 
 Copy and edit:
 
 `examples/linkedin-job-config.example.json`
+
+Set browser choice in config:
+
+```json
+"runtime": {
+  "browser": "chromium"
+}
+```
 
 Set credentials with environment variables:
 

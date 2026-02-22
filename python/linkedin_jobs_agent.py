@@ -181,6 +181,8 @@ DATE_POSTED_CODES = {
     30: "r2592000",
 }
 
+SUPPORTED_BROWSERS = {"chromium", "chrome", "msedge"}
+
 
 @dataclass
 class MatchResult:
@@ -260,9 +262,20 @@ class LinkedInJobsAgent:
         self.run_started_at = utc_now()
 
         runtime = config.get("runtime", {})
+        self.browser = str(runtime.get("browser", "chromium")).strip().lower()
+        if self.browser not in SUPPORTED_BROWSERS:
+            raise ValueError(
+                f"Unsupported runtime.browser '{self.browser}'. "
+                f"Supported values: {', '.join(sorted(SUPPORTED_BROWSERS))}",
+            )
         headless_config = bool_from_value(runtime.get("headless"), default=False)
         self.headless = headless_config if force_headless is None else force_headless
         self.slow_mo_ms = safe_int(runtime.get("slow_mo_ms"), 0)
+        launch_args = runtime.get("launch_args")
+        if isinstance(launch_args, list) and launch_args:
+            self.launch_args = [str(item) for item in launch_args if str(item).strip()]
+        else:
+            self.launch_args = ["--disable-blink-features=AutomationControlled"]
         self.action_timeout_ms = safe_int(runtime.get("action_timeout_ms"), 12_000)
         self.navigation_timeout_ms = safe_int(
             runtime.get("navigation_timeout_ms"),
@@ -299,7 +312,7 @@ class LinkedInJobsAgent:
 
         self._log(
             f"Initialized run. config={self.config_path} output_dir={self.output_dir} "
-            f"headless={self.headless} max_jobs={self.max_jobs_to_review} "
+            f"browser={self.browser} headless={self.headless} max_jobs={self.max_jobs_to_review} "
             f"apply_enabled={self.apply_enabled} dry_run={self.dry_run}",
         )
 
@@ -808,6 +821,27 @@ class LinkedInJobsAgent:
 
         return browser.new_context(**context_kwargs)
 
+    def _launch_browser(self, playwright: Any) -> Browser:
+        launch_kwargs: Dict[str, Any] = {
+            "headless": self.headless,
+            "slow_mo": self.slow_mo_ms,
+        }
+        if self.launch_args:
+            launch_kwargs["args"] = self.launch_args
+
+        try:
+            if self.browser == "chromium":
+                return playwright.chromium.launch(**launch_kwargs)
+            if self.browser == "chrome":
+                return playwright.chromium.launch(channel="chrome", **launch_kwargs)
+            return playwright.chromium.launch(channel="msedge", **launch_kwargs)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to launch browser '{self.browser}'. "
+                "For chromium run: python3 -m playwright install chromium. "
+                "For chrome/msedge, ensure the browser is installed on the host.",
+            ) from exc
+
     def run(self) -> Dict[str, Any]:
         run_error: Optional[str] = None
         search_url = self._build_search_url()
@@ -815,11 +849,7 @@ class LinkedInJobsAgent:
 
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(
-                    headless=self.headless,
-                    slow_mo=self.slow_mo_ms,
-                    args=["--disable-blink-features=AutomationControlled"],
-                )
+                browser = self._launch_browser(playwright)
                 context = self._new_context(browser)
                 page = context.new_page()
                 page.set_default_timeout(self.action_timeout_ms)
@@ -919,6 +949,7 @@ class LinkedInJobsAgent:
             "config_path": str(self.config_path),
             "output_dir": str(self.output_dir),
             "search_url": search_url,
+            "browser": self.browser,
             "headless": self.headless,
             "apply_enabled": self.apply_enabled,
             "dry_run": self.dry_run,

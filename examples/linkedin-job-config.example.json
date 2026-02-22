@@ -7,6 +7,7 @@
     "storage_state_path": "secrets/linkedin-storage-state.json"
   },
   "runtime": {
+    "browser": "chromium",
     "headless": false,
     "slow_mo_ms": 0,
     "action_timeout_ms": 12000,
