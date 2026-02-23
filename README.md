@@ -44,9 +44,45 @@ Set browser choice in config:
 
 ```json
 "runtime": {
-  "browser": "chromium"
+  "browser": "chromium",
+  "session_mode": "isolated"
 }
 ```
+
+`runtime.session_mode` options:
+
+- `isolated` (default): fresh automation context (does not reuse your normal browser login)
+- `persistent_profile`: launch with your real browser profile directory
+- `cdp_attach`: attach to a running browser via CDP
+
+If you want saved Chrome credentials/cookies:
+
+```json
+"runtime": {
+  "browser": "chrome",
+  "session_mode": "persistent_profile",
+  "user_data_dir": "/home/<your-user>/.config/google-chrome",
+  "profile_directory": "Default",
+  "headless": false
+}
+```
+
+When using `persistent_profile`, close all normal Chrome windows first (profile lock can block startup).
+
+If you need to attach to an already running browser window:
+
+1. Start Chrome manually with remote debugging enabled:
+   ```bash
+   google-chrome --remote-debugging-port=9222
+   ```
+2. Set:
+   ```json
+   "runtime": {
+     "browser": "chrome",
+     "session_mode": "cdp_attach",
+     "cdp_url": "http://127.0.0.1:9222"
+   }
+   ```
 
 Set credentials with environment variables:
 

@@ -8,6 +8,11 @@
   },
   "runtime": {
     "browser": "chromium",
+    "session_mode": "isolated",
+    "user_data_dir": "",
+    "profile_directory": "Default",
+    "cdp_url": "http://127.0.0.1:9222",
+    "keep_browser_open": false,
     "headless": false,
     "slow_mo_ms": 0,
     "action_timeout_ms": 12000,

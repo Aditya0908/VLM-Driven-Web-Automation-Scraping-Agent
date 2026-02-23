@@ -182,6 +182,7 @@ DATE_POSTED_CODES = {
 }
 
 SUPPORTED_BROWSERS = {"chromium", "chrome", "msedge"}
+SUPPORTED_SESSION_MODES = {"isolated", "persistent_profile", "cdp_attach"}
 
 
 @dataclass
@@ -247,6 +248,38 @@ def safe_int(value: Any, default: int) -> int:
         return default
 
 
+def default_user_data_dir_for_browser(browser: str) -> Optional[Path]:
+    home = Path.home()
+    browser_key = browser.lower()
+
+    if sys.platform.startswith("linux"):
+        if browser_key == "chrome":
+            return home / ".config" / "google-chrome"
+        if browser_key == "msedge":
+            return home / ".config" / "microsoft-edge"
+        return home / ".config" / "chromium"
+
+    if sys.platform == "darwin":
+        if browser_key == "chrome":
+            return home / "Library" / "Application Support" / "Google" / "Chrome"
+        if browser_key == "msedge":
+            return home / "Library" / "Application Support" / "Microsoft Edge"
+        return home / "Library" / "Application Support" / "Chromium"
+
+    if sys.platform.startswith("win"):
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if not local_app_data:
+            return None
+        base = Path(local_app_data)
+        if browser_key == "chrome":
+            return base / "Google" / "Chrome" / "User Data"
+        if browser_key == "msedge":
+            return base / "Microsoft" / "Edge" / "User Data"
+        return base / "Chromium" / "User Data"
+
+    return None
+
+
 class LinkedInJobsAgent:
     def __init__(
         self,
@@ -268,6 +301,16 @@ class LinkedInJobsAgent:
                 f"Unsupported runtime.browser '{self.browser}'. "
                 f"Supported values: {', '.join(sorted(SUPPORTED_BROWSERS))}",
             )
+        self.session_mode = str(runtime.get("session_mode", "isolated")).strip().lower()
+        if self.session_mode not in SUPPORTED_SESSION_MODES:
+            raise ValueError(
+                f"Unsupported runtime.session_mode '{self.session_mode}'. "
+                f"Supported values: {', '.join(sorted(SUPPORTED_SESSION_MODES))}",
+            )
+        self.user_data_dir = str(runtime.get("user_data_dir", "")).strip()
+        self.profile_directory = str(runtime.get("profile_directory", "")).strip()
+        self.cdp_url = str(runtime.get("cdp_url", "http://127.0.0.1:9222")).strip()
+        self.keep_browser_open = bool_from_value(runtime.get("keep_browser_open"), default=False)
         headless_config = bool_from_value(runtime.get("headless"), default=False)
         self.headless = headless_config if force_headless is None else force_headless
         self.slow_mo_ms = safe_int(runtime.get("slow_mo_ms"), 0)
@@ -312,7 +355,8 @@ class LinkedInJobsAgent:
 
         self._log(
             f"Initialized run. config={self.config_path} output_dir={self.output_dir} "
-            f"browser={self.browser} headless={self.headless} max_jobs={self.max_jobs_to_review} "
+            f"browser={self.browser} session_mode={self.session_mode} headless={self.headless} "
+            f"max_jobs={self.max_jobs_to_review} "
             f"apply_enabled={self.apply_enabled} dry_run={self.dry_run}",
         )
 
@@ -821,13 +865,40 @@ class LinkedInJobsAgent:
 
         return browser.new_context(**context_kwargs)
 
-    def _launch_browser(self, playwright: Any) -> Browser:
+    def _launch_kwargs(self) -> Dict[str, Any]:
         launch_kwargs: Dict[str, Any] = {
             "headless": self.headless,
             "slow_mo": self.slow_mo_ms,
         }
         if self.launch_args:
-            launch_kwargs["args"] = self.launch_args
+            launch_kwargs["args"] = list(self.launch_args)
+        return launch_kwargs
+
+    def _resolve_user_data_dir(self) -> Path:
+        if self.user_data_dir:
+            candidate = Path(self.user_data_dir).expanduser().resolve()
+            if not candidate.exists():
+                raise RuntimeError(
+                    f"runtime.user_data_dir does not exist: {candidate}. "
+                    "Set it to your browser User Data directory.",
+                )
+            return candidate
+
+        inferred = default_user_data_dir_for_browser(self.browser)
+        if inferred is None:
+            raise RuntimeError(
+                "Could not infer default user data directory for this platform. "
+                "Set runtime.user_data_dir explicitly in config.",
+            )
+        if not inferred.exists():
+            raise RuntimeError(
+                f"Inferred browser profile path does not exist: {inferred}. "
+                "Set runtime.user_data_dir explicitly.",
+            )
+        return inferred
+
+    def _launch_browser(self, playwright: Any) -> Browser:
+        launch_kwargs = self._launch_kwargs()
 
         try:
             if self.browser == "chromium":
@@ -842,6 +913,66 @@ class LinkedInJobsAgent:
                 "For chrome/msedge, ensure the browser is installed on the host.",
             ) from exc
 
+    def _launch_persistent_context(self, playwright: Any, user_data_dir: Path) -> BrowserContext:
+        launch_kwargs = self._launch_kwargs()
+        args = list(launch_kwargs.get("args", []))
+        if self.profile_directory:
+            profile_arg = f"--profile-directory={self.profile_directory}"
+            if profile_arg not in args:
+                args.append(profile_arg)
+        if args:
+            launch_kwargs["args"] = args
+
+        try:
+            if self.browser == "chromium":
+                return playwright.chromium.launch_persistent_context(
+                    str(user_data_dir),
+                    **launch_kwargs,
+                )
+            if self.browser == "chrome":
+                return playwright.chromium.launch_persistent_context(
+                    str(user_data_dir),
+                    channel="chrome",
+                    **launch_kwargs,
+                )
+            return playwright.chromium.launch_persistent_context(
+                str(user_data_dir),
+                channel="msedge",
+                **launch_kwargs,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to launch persistent browser profile. "
+                "Close all running windows for that browser/profile and retry. "
+                "If you need to attach to a currently open browser, use "
+                "runtime.session_mode='cdp_attach' with runtime.cdp_url.",
+            ) from exc
+
+    def _create_session(self, playwright: Any) -> Tuple[Optional[Browser], BrowserContext, Page]:
+        if self.session_mode == "cdp_attach":
+            browser = playwright.chromium.connect_over_cdp(
+                self.cdp_url,
+                timeout=self.navigation_timeout_ms,
+            )
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = context.new_page()
+            self._log(f"Attached to existing browser via CDP: {self.cdp_url}")
+            return browser, context, page
+
+        if self.session_mode == "persistent_profile":
+            user_data_dir = self._resolve_user_data_dir()
+            context = self._launch_persistent_context(playwright, user_data_dir)
+            page = context.pages[0] if context.pages else context.new_page()
+            self._log(
+                f"Launched persistent profile context with user_data_dir={user_data_dir}"
+            )
+            return None, context, page
+
+        browser = self._launch_browser(playwright)
+        context = self._new_context(browser)
+        page = context.new_page()
+        return browser, context, page
+
     def run(self) -> Dict[str, Any]:
         run_error: Optional[str] = None
         search_url = self._build_search_url()
@@ -849,91 +980,108 @@ class LinkedInJobsAgent:
 
         try:
             with sync_playwright() as playwright:
-                browser = self._launch_browser(playwright)
-                context = self._new_context(browser)
-                page = context.new_page()
-                page.set_default_timeout(self.action_timeout_ms)
-                page.set_default_navigation_timeout(self.navigation_timeout_ms)
+                browser: Optional[Browser] = None
+                context: Optional[BrowserContext] = None
+                page: Optional[Page] = None
+                try:
+                    browser, context, page = self._create_session(playwright)
+                    page.set_default_timeout(self.action_timeout_ms)
+                    page.set_default_navigation_timeout(self.navigation_timeout_ms)
 
-                self._login(page, context)
+                    self._login(page, context)
 
-                page.goto(search_url, wait_until="domcontentloaded")
-                page.wait_for_timeout(1500)
-                if self._wait_for_any(page, LOGIN_FORM_SELECTORS, timeout_ms=1500):
-                    raise RuntimeError("Session redirected to login page after search navigation.")
+                    page.goto(search_url, wait_until="domcontentloaded")
+                    page.wait_for_timeout(1500)
+                    if self._wait_for_any(page, LOGIN_FORM_SELECTORS, timeout_ms=1500):
+                        raise RuntimeError("Session redirected to login page after search navigation.")
 
-                card_selector = self._resolve_job_card_selector(page)
-                self._expand_results(page, card_selector)
+                    card_selector = self._resolve_job_card_selector(page)
+                    self._expand_results(page, card_selector)
 
-                cards = page.locator(card_selector)
-                visible_cards = cards.count()
-                review_count = min(visible_cards, self.max_jobs_to_review)
-                self._log(f"Processing {review_count} job cards.")
-
-                applications_sent = 0
-
-                for index in range(review_count):
                     cards = page.locator(card_selector)
-                    card = cards.nth(index)
-                    try:
-                        card.scroll_into_view_if_needed(timeout=2000)
-                        card_url = self._extract_job_url(page, card)
-                        card.click(timeout=3000)
-                        page.wait_for_timeout(1100)
-                        self._wait_for_any(page, JOB_DETAILS_ROOT_SELECTORS, timeout_ms=5000)
-                    except Exception as exc:
-                        self._log(f"Failed to open card {index + 1}: {exc}")
-                        continue
+                    visible_cards = cards.count()
+                    review_count = min(visible_cards, self.max_jobs_to_review)
+                    self._log(f"Processing {review_count} job cards.")
 
-                    job_data = self._scrape_current_job(page, index + 1, card_url)
-                    match = self._evaluate_match(job_data)
-                    job_data["match"] = match.to_dict()
-                    self.scraped_jobs.append(job_data)
+                    applications_sent = 0
 
-                    if self.screenshot_each_job:
-                        screenshot_path = self.output_dir / f"job-{index + 1:03}.png"
+                    for index in range(review_count):
+                        cards = page.locator(card_selector)
+                        card = cards.nth(index)
                         try:
-                            page.screenshot(path=str(screenshot_path), full_page=False)
-                            job_data["screenshot"] = str(screenshot_path)
-                        except Exception:
-                            pass
+                            card.scroll_into_view_if_needed(timeout=2000)
+                            card_url = self._extract_job_url(page, card)
+                            card.click(timeout=3000)
+                            page.wait_for_timeout(1100)
+                            self._wait_for_any(page, JOB_DETAILS_ROOT_SELECTORS, timeout_ms=5000)
+                        except Exception as exc:
+                            self._log(f"Failed to open card {index + 1}: {exc}")
+                            continue
 
-                    self._log(
-                        f"Job {index + 1}/{review_count}: "
-                        f"title='{job_data.get('title', '')}' "
-                        f"company='{job_data.get('company', '')}' "
-                        f"score={match.score} match={match.is_match}",
-                    )
+                        job_data = self._scrape_current_job(page, index + 1, card_url)
+                        match = self._evaluate_match(job_data)
+                        job_data["match"] = match.to_dict()
+                        self.scraped_jobs.append(job_data)
 
-                    if match.is_match:
-                        self.relevant_jobs.append(job_data)
+                        if self.screenshot_each_job:
+                            screenshot_path = self.output_dir / f"job-{index + 1:03}.png"
+                            try:
+                                page.screenshot(path=str(screenshot_path), full_page=False)
+                                job_data["screenshot"] = str(screenshot_path)
+                            except Exception:
+                                pass
 
-                    if (
-                        self.apply_enabled
-                        and match.is_match
-                        and job_data.get("easy_apply_available")
-                        and applications_sent < self.max_applications_per_run
-                    ):
-                        app_result = self._attempt_easy_apply(page, job_data)
-                        app_entry = {
-                            "job_id": job_data.get("job_id"),
-                            "job_url": job_data.get("job_url"),
-                            "title": job_data.get("title"),
-                            "company": job_data.get("company"),
-                            "attempted_at": utc_now(),
-                            "result": app_result,
-                            "dry_run": self.dry_run,
-                        }
-                        self.application_log.append(app_entry)
                         self._log(
-                            f"Easy Apply result for job {job_data.get('job_id') or job_data.get('job_url')}: "
-                            f"{app_result}",
+                            f"Job {index + 1}/{review_count}: "
+                            f"title='{job_data.get('title', '')}' "
+                            f"company='{job_data.get('company', '')}' "
+                            f"score={match.score} match={match.is_match}",
                         )
-                        if app_result.get("status") in {"submitted", "dry_run_ready_to_submit"}:
-                            applications_sent += 1
 
-                context.close()
-                browser.close()
+                        if match.is_match:
+                            self.relevant_jobs.append(job_data)
+
+                        if (
+                            self.apply_enabled
+                            and match.is_match
+                            and job_data.get("easy_apply_available")
+                            and applications_sent < self.max_applications_per_run
+                        ):
+                            app_result = self._attempt_easy_apply(page, job_data)
+                            app_entry = {
+                                "job_id": job_data.get("job_id"),
+                                "job_url": job_data.get("job_url"),
+                                "title": job_data.get("title"),
+                                "company": job_data.get("company"),
+                                "attempted_at": utc_now(),
+                                "result": app_result,
+                                "dry_run": self.dry_run,
+                            }
+                            self.application_log.append(app_entry)
+                            self._log(
+                                f"Easy Apply result for job {job_data.get('job_id') or job_data.get('job_url')}: "
+                                f"{app_result}",
+                            )
+                            if app_result.get("status") in {"submitted", "dry_run_ready_to_submit"}:
+                                applications_sent += 1
+                finally:
+                    if self.session_mode == "cdp_attach":
+                        if page is not None and not self.keep_browser_open:
+                            try:
+                                page.close()
+                            except Exception:
+                                pass
+                    else:
+                        if context is not None:
+                            try:
+                                context.close()
+                            except Exception:
+                                pass
+                        if browser is not None:
+                            try:
+                                browser.close()
+                            except Exception:
+                                pass
 
         except Exception as exc:
             run_error = str(exc)
@@ -950,6 +1098,7 @@ class LinkedInJobsAgent:
             "output_dir": str(self.output_dir),
             "search_url": search_url,
             "browser": self.browser,
+            "session_mode": self.session_mode,
             "headless": self.headless,
             "apply_enabled": self.apply_enabled,
             "dry_run": self.dry_run,
