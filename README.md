@@ -61,20 +61,28 @@ If you want saved Chrome credentials/cookies:
 "runtime": {
   "browser": "chrome",
   "session_mode": "persistent_profile",
-  "user_data_dir": "/home/<your-user>/.config/google-chrome",
+  "user_data_dir": "",
   "profile_directory": "Default",
   "headless": false
 }
 ```
 
-When using `persistent_profile`, close all normal Chrome windows first (profile lock can block startup).
+`user_data_dir` is cross-platform:
+
+- Leave it empty (`""`) to use automatic OS detection.
+- Or set it explicitly:
+  - Linux: `~/.config/google-chrome`
+  - macOS: `~/Library/Application Support/Google/Chrome`
+  - Windows: `%LOCALAPPDATA%\\Google\\Chrome\\User Data`
+
+When using `persistent_profile`, close all normal browser windows first (profile lock can block startup).
 
 If you need to attach to an already running browser window:
 
-1. Start Chrome manually with remote debugging enabled:
-   ```bash
-   google-chrome --remote-debugging-port=9222
-   ```
+1. Start your browser manually with remote debugging enabled:
+   - Linux (Chrome): `google-chrome --remote-debugging-port=9222`
+   - macOS (Chrome): `open -a "Google Chrome" --args --remote-debugging-port=9222`
+   - Windows (Chrome): `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222`
 2. Set:
    ```json
    "runtime": {
